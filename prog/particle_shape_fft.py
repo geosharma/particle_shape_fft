@@ -74,11 +74,12 @@ warningcontour = "WARNING: More than one countour found"
 # open the summary file
 sfile = open(smryfile, 'w')
 
-# print the heading
+# print the heading, A0 is the mean amplitude and FD are the Fourier
+# descriptors
 print("{0:15s},{1:7s},{2:7s},{3:7s},{4:7s},{5:7s},{6:7s},{7:7s},{8:7s},\
-{9:7s},{10:7s}".format(
+{9:7s},{10:10s}".format(
     "Filename", "A0", "FD1", "FD2", "FD3", "FD4", "FD5", "FD6", "FD7", "FD8",
-    "Norm"), file=sfile)
+    "1 - Norm"), file=sfile)
 
 figscale = 0.75
 # create figures and later clear axis and reuse again
@@ -136,33 +137,26 @@ for image in images:
         warning = ""
 
     # since the files are binary images of single particles, each image should
-    # should only have one contour associated with it
+    # should only have one contour associated with it, only use the first
+    # contour.
     cnt = cnts[0]
+
+    # find the center of mass from the moments of the contours
     area = cv2.contourArea(cnt) * scale**2
     M = cv2.moments(cnt)
     cX = int(M["m10"] / M["m00"])
     cY = int(M["m01"] / M["m00"])
 
-    # fit an ellipse and get the orientation of the minor ellipse axis
+    # fit an ellipse and get the orientation of the minor ellipse axis,
     rotatedrect = cv2.minAreaRect(cnt)
 
+    # find the orientation of the major axis, all angles are with the particle
+    # aligned along the major axis
     # find the correct reference for this
     if rotatedrect[1][0] < rotatedrect[1][1]:
-        oriang = np.radians(90.0 - rotatedrect[2])
+        min_ellipse_ax_orien = np.radians(90.0 - rotatedrect[2])
     else:
-        oriang = np.radians(-rotatedrect[2])
-    # print('Rect ouput: ', rotatedrect)
-    # print('Rect Angle: ', oriang)
-    # print("Angle: ", np.degrees(oriang))
-
-    # print('Angle: ', angle)
-    # create 8 bit color image, important to initialize
-    # img_rgb = np.zeros((h, w, 3), np.uint8)
-    # img_rgb = cv2.cvtColor(img_crpd, cv2.COLOR_GRAY2RGB)
-    # cv2.drawContours(img_rgb, [cnt], -1, (200, 0, 0), 2)
-    # cv2.circle(img_rgb, (cX, cY), 3, (44, 127, 184), -1)
-    # cv2.putText(img_rgb, "center", (cX - 20, cY - 20),
-    #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (127, 205, 187), 2)
+        min_ellipse_ax_orien = np.radians(-rotatedrect[2])
 
     # extract the contour elements
     xcon = cnt[:, 0][:, 0]
@@ -184,14 +178,17 @@ for image in images:
         # use the orientation of the minor ellipse axis from above and assign
         # the direction of the major ellipse axis as the starting point
         # the orientation of the particle major ellipse axis is horizontal
-        angle = -oriang + theta
+        angle = -min_ellipse_ax_orien + theta
 
         # translate to the origin (0, 0) and rotate the contour and
         # translate back to the center of mass
         xr = (xd - cX) * np.cos(angle) + (yd - cY) * np.sin(angle) + cX
         yr = -(xd - cX) * np.sin(angle) + (yd - cY) * np.cos(angle) + cY
 
-        # the horizontal line
+        # the horizontal line, passing through the center of mass
+        # most probably it would be more efficient to find the x-axis
+        # intercepts after translating to the origin and rotating, but I
+        # wanted to use shapely
         slope = np.tan(np.radians(0))
         intercept = cY - slope * cX
         pline = np.array([slope, intercept], dtype=np.float32)
@@ -215,10 +212,11 @@ for image in images:
         shly = np.asarray(shline)[:, 1]
         r1 = np.sqrt((points[0].x - cX)**2 + (points[0].y - cY)**2) * scale
         r2 = np.sqrt((points[1].x - cX)**2 + (points[1].y - cY)**2) * scale
-        # print("Point 1: ", points[0].x, points[0].y, 'Radius 1: ', r1)
-        # print("Point 2: ", points[1].x, points[1].y, 'Radius 2: ', r2)
+
+        # store the results to the array
         stang[i] = theta
         strad[i] = r2
+        # the intersection points are 180 degrees apart
         stang[len(angles) + i] = theta + np.pi
         strad[len(angles) + i] = r1
         i += 1
@@ -226,15 +224,12 @@ for image in images:
     # start the fft code
     # fft amplitude spectrum
     ps = np.abs(np.fft.fft(strad))
-    # ps = 20*np.log10(ps)
-    # power spectrum, two ways to define the amplitude of the power
-    # ps = ps**2
     freqs = np.fft.fftfreq(strad.size)
     idx = np.argsort(freqs)
 
     # print to the output file
     print("{0:15s},{1:7.6e},{2:7.6e},{3:7.6e},{4:7.6e},{5:7.6e},{6:7.6e},\
-    {7:7.6e},{8:7.6e},{9:7.6e},{10:7.6e}".format(
+    {7:7.6e},{8:7.6e},{9:7.6e},{10:10.6e}".format(
         imagenoext, ps[0], ps[1]/ps[0], ps[2]/ps[0], ps[3]/ps[0], ps[4]/ps[0],
         ps[5]/ps[0], ps[6]/ps[0], ps[7]/ps[0], ps[8]/ps[0],
         1 - la.norm(ps[1:9]/ps[0])), file=sfile)
@@ -290,25 +285,3 @@ for image in images:
 
 # close the summary file
 sfile.close()
-# create 8 bit color image. Important to initialize
-# cv2.imwrite(filepath + '00_crpd.png', img_crpd)
-# cv2.imwrite(filepath + '01_contour.png', img_rgb)
-
-# # plots
-# # plt.plot(xcon, ycon, label="contour")
-# plt.plot(xd, yd, label='smooth')
-# plt.plot(shpx, shpy, label='rotated')
-# plt.plot(shlx, shly, label='line')
-# plt.plot(cX, cY, 'o', color='tab:red')
-# plt.plot(points[0].x, points[0].y, 's', color='tab:purple')
-# plt.plot(points[1].x, points[1].y, 's', color='tab:purple')
-# plt.xlabel(r'Width, $w$ [pixel]')
-# plt.ylabel(r'Height, $h$ [pixel]')
-# ax = plt.gca()
-# plt.ylim(ax.get_ylim()[::-1])
-# plt.legend(loc=1)
-# plt.savefig('../analysis/plots.png')
-# plt.plot(stang, strad)
-# plt.xlabel(r"$\theta$ [rad]")
-# plt.ylabel(r"Radius [mm]")
-# plt.show()
